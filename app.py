@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File
-from app.schemas import PredictionResponse
+from schemas import PredictionResponse
 from PIL import Image
 import os
 from dotenv import load_dotenv
