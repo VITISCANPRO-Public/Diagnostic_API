@@ -27,7 +27,7 @@ async def diagno(file: UploadFile = File(...)):
     fake_confidence = 0.87
 
     return PredictionResponse(
-        maladie=fake_prediction,
+        disease=fake_prediction,
         confidence=fake_confidence,
         mlflow_uri=MLFLOW_TRACKING_URI,
         api_uri=API_URI

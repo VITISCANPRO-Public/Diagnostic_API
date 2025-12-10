@@ -3,6 +3,7 @@ import requests
 def test_diagno():
     files = {'file': open('tests/sample_leaf.jpg', 'rb')}
     response = requests.post("http://localhost:8000/diagno", files=files)
+    print(response.json())
     assert response.status_code == 200
     data = response.json()
     assert "disease" in data
