@@ -1,0 +1,33 @@
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+*.pt
+
+# --- Environnements virtuels ---
+venv/
+.env/
+.venv/
+
+# --- Configurations locales ---
+.env            # cache le fichier des variables d'environnement
+*.env           # cache tout fichier .env supplémentaire
+*.log
+*.sqlite3
+
+# --- Dépendances ---
+*.egg-info/
+dist/
+build/
+
+# --- IDE / éditeurs ---
+.vscode/
+.idea/
+*.swp
+
+# --- Tests / données temporaires ---
+tests/__pycache__/
+tests/*.jpg
+tests/*.png
