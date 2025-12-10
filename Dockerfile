@@ -25,4 +25,4 @@ RUN pip install --upgrade pip && pip install -r /tmp/requirements.txt
 COPY --chown=user . $HOME/app/
 
 #CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "api-ibm-attr:app", "--bind", "0.0.0.0", "--port", "$PORT"]
-ENTRYPOINT ["/bin/bash", "-c", "gunicorn -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT app.main:app"]
+ENTRYPOINT ["/bin/bash", "-c", "gunicorn -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT app:app"]
