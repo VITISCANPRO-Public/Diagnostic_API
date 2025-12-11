@@ -4,6 +4,14 @@ from PIL import Image
 import os
 from dotenv import load_dotenv
 
+from fastapi.responses import JSONResponse
+
+@app.post("/diagno", response_model=PredictionResponse)
+async def diagno(file: UploadFile = File(...)):
+    if file is None:
+        return JSONResponse(status_code=400, content={"message": "Aucun fichier reçu"})
+
+
 load_dotenv()
 
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "https://mlflow.monserveur.com")
