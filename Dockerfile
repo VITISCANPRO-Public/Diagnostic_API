@@ -22,7 +22,10 @@ RUN pip install --upgrade pip && pip install -r /tmp/requirements.txt
 # Copy all local files to /home/user/app with "user" as owner of these files
 # Always use --chown=user when using HUGGINGFACE to avoid permission errors
 #COPY --chown=user . $HOME/app
-COPY --chown=user . $HOME/app/
+COPY --chown=user README.md Dockerfile requirements.txt *.py $HOME/app/
 
 #CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "api-ibm-attr:app", "--bind", "0.0.0.0", "--port", "$PORT"]
-ENTRYPOINT ["/bin/bash", "-c", "gunicorn -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT app:app"]
+#CMD ["/bin/bash", "-c", "uvicorn", "--host", "0.0.0.0", "--port", "$API_SERVER_PORT", "app:app"]
+CMD uvicorn --host 0.0.0.0 --port ${API_SERVER_PORT} app:app
+#ENTRYPOINT ["/bin/bash", "-c", "gunicorn -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT app:app"]
+
