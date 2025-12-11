@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 RUN apt-get update \
     && apt-get install -y vim nano unzip curl \
@@ -23,7 +23,6 @@ RUN pip install --upgrade pip && pip install -r /tmp/requirements.txt
 # Always use --chown=user when using HUGGINGFACE to avoid permission errors
 #COPY --chown=user . $HOME/app
 COPY --chown=user . $HOME/app/
-COPY --chown=user .env $HOME/app/
 
 #CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "api-ibm-attr:app", "--bind", "0.0.0.0", "--port", "$PORT"]
-ENTRYPOINT ["/bin/bash", "-c", "gunicorn -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT app.main:app"]
+ENTRYPOINT ["/bin/bash", "-c", "gunicorn -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT app:app"]
