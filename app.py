@@ -1,4 +1,6 @@
 import os
+import io
+import tempfile
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse
@@ -15,8 +17,10 @@ from torchvision.transforms.functional import to_pil_image
 
 load_dotenv()
 
+DEVICE='cpu'
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI","https://gviel-mlflow37.hf.space")
-MLFLOW_MODEL_URI = os.getenv("MLFLOW_MODEL_URI", "mlflow-artifacts:/1/models/m-d4b6b9639a2b461b882af6c1ef3fbc61/artifacts")
+#MLFLOW_MODEL_URI = os.getenv("MLFLOW_MODEL_URI", "mlflow-artifacts:/1/models/m-d4b6b9639a2b461b882af6c1ef3fbc61/artifacts") # modele GPU du 15/12 matin
+MLFLOW_MODEL_URI = os.getenv("MLFLOW_MODEL_URI", "mlflow-artifacts:/1/models/m-9108424091d4400bba390f1e00f7a914/artifacts") # modèle CPU du 15/12 soir
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 MODEL = mlflow.pytorch.load_model(MLFLOW_MODEL_URI)
 MODEL.eval()
@@ -43,49 +47,38 @@ app = FastAPI(title="VitiScan Diagno API")
 def root():
     return {"message": "Vitiscan Diagno API is running"}
 
-'''
-# Réponse factice
 @app.post("/diagno", response_model=PredictionResponse)
 async def diagno(file: UploadFile = File(...)):
     if file is None:
         return JSONResponse(status_code=400, content={"message": "Aucun fichier reçu"})
     
-    # Réponse factice : mock response
-    # fake_prediction = "mildiou"
-    # fake_confidence = 0.87
-    # fake_model_version = "Resnet18_50ep_v2"
+    # on devrait récupèrer l'image sous forme de bytes directement et créer l'image PIL
+    # contents = await file.read()
+    #pil_image = Image.open(io.BytesIO(contents))
 
-    predictions = [DiseasePrediction(disease="mildiou", confidence=0.87)]
-    return PredictionResponse(
-        predictions=predictions,
-        model_version="Resnet18_50ep_v2"
-    )
+    # pour l'instant obligé de passer par un fichier temporaire
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
+        contents = await file.read()
+        tmp_file.write(contents)
+        tmp_file_path = tmp_file.name
 
-    # return PredictionResponse(
-    #     disease=fake_prediction,
-    #     confidence=fake_confidence,
-    #     model_version=fake_model_version
-    # )
-'''
-
-@app.post("/diagno", response_model=PredictionResponse)
-async def diagno(file: UploadFile = File(...)):
-    if file is None:
-        return JSONResponse(status_code=400, content={"message": "Aucun fichier reçu"})
-    
-    #contents = await file.read()
-    #print("filename=", file.filename)
-    #print("type(filename)=", type(file.filename))
-    tensor_image = read_image(file.filename)
-    image = to_pil_image(tensor_image)
-    img_converted = image.convert("RGB")
-    tensor = transform(img_converted).unsqueeze(0)
-    device = next(MODEL.parameters()).device
-    print(f'The model is on: {device}')
-    tensor.to("cpu")
-    MODEL.to("cpu")
-    raw_predictions = predict_image(MODEL, tensor) # Prédictions
-    predictions = [DiseasePrediction(disease=d, confidence=c) for d, c in raw_predictions]
+    try:
+        # on lit l'image sous forme de tensor et 
+        tensor_image = read_image(tmp_file_path)
+        image = to_pil_image(tensor_image) # on fait ensuite la conversion en Image PIL
+        img_converted = image.convert("RGB") # on convertit en RGB
+        tensor = transform(img_converted).unsqueeze(0)
+        # on force le modèle et les datas en CPU
+        device = next(MODEL.parameters()).device
+        print(f'DEBUG : The model is on: {device}')
+        tensor.to(DEVICE)
+        MODEL.to(DEVICE)
+        raw_predictions = predict_image(MODEL, tensor) # Prédictions
+        predictions = [DiseasePrediction(disease=d, confidence=c) for d, c in raw_predictions]
+    except:
+        predictions = []
+    finally:
+        os.unlink(tmp_file_path)  
     
     return PredictionResponse(
             predictions = predictions,
@@ -113,25 +106,6 @@ def predict_image(model, input_tensor: torch.Tensor):
         predictions.sort(key=lambda x: x[1], reverse=True) # Tri décroissante de la confiance
     return predictions
 
-'''
-def preprocess_image(img_filename:str) -> torch.Tensor:
-    transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ColorJitter(brightness=0.5, contrast=0.5),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                    std=[0.229, 0.224, 0.225])
-        ]) 
-    #image = Image.open(io.BytesIO(file_bytes)).convert("RGB")
-    #with open(img_filename, 'rb') as f:
-    print(type(img_filename))
-    image = Image.open(img_filename) # return ImageFile
-    img_converted = image.convert("RGB") # renvoie PIL.Image.Image
-    #to_pil = transforms.ToPILImage()
-    #img_from_tensor = to_pil(img_converted)
-    tensor = transform(img_converted).unsqueeze(0)
-    return tensor
-'''
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="127.0.0.1", port=4000, reload=True)
