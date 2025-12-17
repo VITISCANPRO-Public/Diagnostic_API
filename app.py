@@ -1,6 +1,7 @@
 import os
 import io
 import tempfile
+import boto3
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse
@@ -14,17 +15,35 @@ import torchvision.transforms as transforms
 #from torchvision.transforms import v2
 from torchvision.io import read_image
 from torchvision.transforms.functional import to_pil_image
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
 DEVICE='cpu'
+EXPERIMENT_NAME= os.getenv("EXPERIMENT_NAME")
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI","https://gviel-mlflow37.hf.space")
 #MLFLOW_MODEL_URI = os.getenv("MLFLOW_MODEL_URI", "mlflow-artifacts:/1/models/m-d4b6b9639a2b461b882af6c1ef3fbc61/artifacts") # modele GPU du 15/12 matin
 MLFLOW_MODEL_URI = os.getenv("MLFLOW_MODEL_URI", "s3://aws-s3-mlflow/mlflow-artifacts/3/models/m-46e598be60f940849247fc01cf53dc3c/artifacts/data/model.pth") # modèle CPU du 15/12 soir
+
+# chargement du modèle
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-MODEL = torch.load(MLFLOW_MODEL_URI, map_location="cpu")
+s3 = boto3.client('s3')
+model_local_path = '/tmp/model.pth'
+s3_bucket_name = MLFLOW_MODEL_URI.replace("s3://","").split("/")[0]
+s3_artifact_uri = MLFLOW_MODEL_URI.replace(s3_bucket_name, "")
+logger.info(f"s3_bucket_name={s3_bucket_name}")
+logger.info(f"s3_artifact_uri={s3_artifact_uri}")
+logger.info(f"model_local_path={model_local_path}")
+s3.download_file(s3_bucket_name, s3_artifact_uri, model_local_path)
+logger.info(f"model downloaded !")
+MODEL = torch.load(model_local_path, map_location="cpu")
 MODEL.eval()
-EXPERIMENT_NAME= os.getenv("EXPERIMENT_NAME")
 
 #RUN_ID="2ac846b9752d4561ba7fa58864fec52a"
 #run = mlflow.get_run(RUN_ID)
