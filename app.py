@@ -54,7 +54,8 @@ logger.info(f"model_file_size={file_size}")
 experiment_id = mlflow_model_uri_splitted[2]
 experiment = mlflow.get_experiment(experiment_id)
 EXPERIMENT_NAME = experiment.name
-logger.info(f"EXPERIMENT_NAME={EXPERIMENT_NAME}")
+#logger.info(f"EXPERIMENT_NAME={EXPERIMENT_NAME}")
+logger.info("EXPERIMENT_NAME=%s", EXPERIMENT_NAME)
 
 with tqdm(total=file_size, unit='B', unit_scale=True, desc='Téléchargement') as pbar:
     s3.download_file(
