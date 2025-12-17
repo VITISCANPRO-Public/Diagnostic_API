@@ -36,7 +36,7 @@ mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 s3 = boto3.client('s3')
 model_local_path = '/tmp/model.pth'
 s3_bucket_name = MLFLOW_MODEL_URI.replace("s3://","").split("/")[0]
-s3_artifact_uri = MLFLOW_MODEL_URI.replace(s3_bucket_name, "")
+s3_artifact_uri = MLFLOW_MODEL_URI.replace("s3://","").replace(s3_bucket_name, "")
 logger.info(f"s3_bucket_name={s3_bucket_name}")
 logger.info(f"s3_artifact_uri={s3_artifact_uri}")
 logger.info(f"model_local_path={model_local_path}")
