@@ -135,7 +135,6 @@ disease = [
 ]
 
 def predict_image(model, input_tensor: torch.Tensor):
-    print(type(input_tensor))
     with torch.no_grad():
         output = model(input_tensor)
         probs = torch.nn.functional.softmax(output, dim=1)[0]
