@@ -27,24 +27,33 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 DEVICE='cpu'
-EXPERIMENT_NAME= os.getenv("EXPERIMENT_NAME")
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI","https://gviel-mlflow37.hf.space")
-#MLFLOW_MODEL_URI = os.getenv("MLFLOW_MODEL_URI", "mlflow-artifacts:/1/models/m-d4b6b9639a2b461b882af6c1ef3fbc61/artifacts") # modele GPU du 15/12 matin
-MLFLOW_MODEL_URI = os.getenv("MLFLOW_MODEL_URI", "s3://aws-s3-mlflow/mlflow-artifacts/3/models/m-46e598be60f940849247fc01cf53dc3c/artifacts/data/model.pth") # modèle CPU du 15/12 soir
+#structure MLFlow URI : s3://<bucket-name>/<mlflow_dir_name>/<experiment_id>/models/m-<model-uuid>/artifacts/data/model.pth
+MLFLOW_MODEL_URI = os.getenv("MLFLOW_MODEL_URI", "s3://aws-s3-mlflow/mlflow-artifacts/3/models/m-46e598be60f940849247fc01cf53dc3c/artifacts/data/model.pth")
 
+##########################
 # chargement du modèle
-mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+##########################
+#mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+# préparation du download du S3
 s3 = boto3.client('s3')
 model_local_path = '/tmp/model.pth'
-s3_bucket_name = MLFLOW_MODEL_URI.replace("s3://","").split("/")[0]
+mlflow_model_uri_splitted = MLFLOW_MODEL_URI.replace("s3://","").split("/")
+s3_bucket_name = mlflow_model_uri_splitted[0]
 s3_artifact_uri = MLFLOW_MODEL_URI.replace("s3://"+s3_bucket_name+"/", "")
 logger.info(f"s3_bucket_name={s3_bucket_name}")
 logger.info(f"s3_artifact_uri={s3_artifact_uri}")
 logger.info(f"model_local_path={model_local_path}")
 
+# calcul taille du fichier du modèle
 response = s3.head_object(Bucket=s3_bucket_name, Key=s3_artifact_uri)
 file_size = response['ContentLength']
 logger.info(f"model_file_size={file_size}")
+
+# récupération de l'experiment_id et experiment_name
+experiment_id = mlflow_model_uri_splitted[2]
+experiment = mlflow.get_experiment(experiment_id)
+logger.info("experiment name = ", experiment.name)
 
 with tqdm(total=file_size, unit='B', unit_scale=True, desc='Téléchargement') as pbar:
     s3.download_file(
@@ -54,18 +63,12 @@ with tqdm(total=file_size, unit='B', unit_scale=True, desc='Téléchargement') a
         Callback=lambda bytes_transferred: pbar.update(bytes_transferred)
 )
 
+# chargement du modèle en mémoire en forçant vers le CPU
 logger.info(f"model downloaded !")
-MODEL = torch.load(model_local_path, map_location="cpu")
+MODEL = torch.load(model_local_path, map_location=DEVICE)
 MODEL.eval()
 
-#RUN_ID="2ac846b9752d4561ba7fa58864fec52a"
-#run = mlflow.get_run(RUN_ID)
-#experiment_id = run.info.experiment_id
-#experiment = mlflow.get_experiment(experiment_id)
-#EXPERIMENT_NAME = experiment.name
-print("EXPERIMENT_NAME=", EXPERIMENT_NAME)
-
-
+# transformation à appliquer pour la prédiction (sans le random ColorJitter)
 transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
