@@ -66,10 +66,8 @@ def load_model_from_s3(s3_bucket_name:str, s3_artifact_uri:str):
     response = S3_CLIENT.head_object(Bucket=s3_bucket_name, Key=s3_artifact_uri)
     file_size = response['ContentLength']
     logger.info(f"model_file_size = {file_size}")
-    logger.debug(f"Bucket={s3_bucket_name}")
-    logger.info(f"Key={s3_artifact_uri}")
     # téléchargement vers un fichier temporaire
-    with tempfile.NamedTemporaryFile(prefix="model", mode='wb', delete=False) as tmp_file:
+    with tempfile.NamedTemporaryFile(prefix="model", mode='wb', suffix='.pth', delete=False) as tmp_file:
         model_local_path = tmp_file.name
         logger.info(f"tmp_file.name={model_local_path}")
         with tqdm(total=file_size, unit='B', unit_scale=True, desc='Téléchargement') as pbar:
@@ -140,10 +138,10 @@ async def startup():
         # récupération de l'experiment_id et experiment_name
         #experiment_id = mlflow_model_uri_splitted[2]
         MODEL_ID = mlflow_model_uri_splitted[4]
-        logger.info(f"MODEL_ID=%", MODEL_ID)
+        logger.info(f"MODEL_ID={MODEL_ID}")
         logged_model = mlflow.get_logged_model(MODEL_ID)
         MODEL_NAME = logged_model.name
-        logger.info(f"MODEL_NAME=%", MODEL_NAME)
+        logger.info(f"MODEL_NAME={MODEL_NAME}")
         #EXPERIMENT = mlflow.get_experiment(experiment_id)
         #EXPERIMENT_NAME = EXPERIMENT.name
         #logger.info(f"EXPERIMENT_NAME=%", EXPERIMENT_NAME)
