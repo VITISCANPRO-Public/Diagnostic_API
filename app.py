@@ -1,5 +1,6 @@
 import os
 import io
+import json
 import tempfile
 import boto3
 from dotenv import load_dotenv
@@ -16,6 +17,8 @@ import torchvision.transforms as transforms
 from torchvision.io import read_image
 from torchvision.transforms.functional import to_pil_image
 import logging
+import tempfile
+from pathlib import Path
 from tqdm import tqdm
 
 logging.basicConfig(
@@ -30,6 +33,7 @@ DEVICE='cpu'
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI","https://gviel-mlflow37.hf.space")
 #structure MLFlow URI : s3://<bucket-name>/<mlflow_dir_name>/<experiment_id>/models/m-<model-uuid>/artifacts/data/model.pth
 MLFLOW_MODEL_URI = os.getenv("MLFLOW_MODEL_URI", "s3://aws-s3-mlflow/mlflow-artifacts/3/models/m-46e598be60f940849247fc01cf53dc3c/artifacts/data/model.pth")
+DATASET_NAME = os.getenv("DATASET_NAME", "kaggle")
 
 ##########################
 # chargement du modèle
@@ -69,6 +73,9 @@ with tqdm(total=file_size, unit='B', unit_scale=True, desc='Téléchargement') a
 logger.info(f"model downloaded !")
 MODEL = torch.load(model_local_path, map_location=DEVICE)
 MODEL.eval()
+
+# chargement des maladies
+load_disease(bucket_name=s3_bucket_name, file_path=f'vitiscan-data/diseases-{DATASET_NAME}.json')
 
 # transformation à appliquer pour la prédiction (sans le random ColorJitter)
 transform = transforms.Compose([
@@ -110,7 +117,8 @@ async def diagno(file: UploadFile = File(...)):
         print(f'DEBUG : The model is on: {device}')
         tensor.to(DEVICE)
         MODEL.to(DEVICE)
-        raw_predictions = predict_image(MODEL, tensor) # Prédictions
+        # Réalisation de la prédiction
+        raw_predictions = predict_image(MODEL, tensor)
         predictions = [DiseasePrediction(disease=d, confidence=c) for d, c in raw_predictions]
     except:
         predictions = []
@@ -124,7 +132,8 @@ async def diagno(file: UploadFile = File(...)):
 
 # ---------------------------------  PREDICTION -------------------------------
 # Classes names
-disease = [
+'''
+DISEASES = [
     "anthracnose",
     "brown_spot",
     "downy_mildew",
@@ -133,12 +142,33 @@ disease = [
     "powdery_mildew",
     "shot_hole"
 ]
+'''
+def load_disease(bucket_name:str, file_path:str):
+    # chargement des maladies
+    global DISEASES
+    try:
+        response = s3.get_object(Bucket=bucket_name, Key=file_path)
+        data = response['Body'].read().decode('utf-8')
+        DISEASES = json.loads(data)
+    except:
+        DISEASES = { 'N/A' : 'N/A' }
+
+    with tempfile.TemporaryDirectory() as tempdir:
+        disease_filename = f'disease-{DATASET_NAME}.json'
+        tmpfile = str(Path(tempdir, disease_filename))
+        s3.download_file(
+            s3_bucket_name,
+            f'vitiscan-data/{disease_filename}',
+            tmpfile
+        )
+        os.unlink(tempdir)
+        
 
 def predict_image(model, input_tensor: torch.Tensor):
     with torch.no_grad():
         output = model(input_tensor)
         probs = torch.nn.functional.softmax(output, dim=1)[0]
-        predictions = [(disease[i], float(probs[i])) for i in range(len(disease))] # Création de la liste DiseasePrediction
+        predictions = [(DISEASES[i], float(probs[i])) for i in range(len(DISEASES))] # Création de la liste DiseasePrediction
         predictions.sort(key=lambda x: x[1], reverse=True) # Tri décroissante de la confiance
     return predictions
 
