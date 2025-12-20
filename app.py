@@ -69,7 +69,7 @@ def load_model_from_s3(s3_bucket_name:str, s3_artifact_uri:str):
     logger.debug(f"Bucket={s3_bucket_name}")
     logger.info(f"Key={s3_artifact_uri}")
     # téléchargement vers un fichier temporaire
-    with tempfile.NamedTemporaryFile(prefix="model", text=False) as tmp_file:
+    with tempfile.NamedTemporaryFile(prefix="model", mode='wb', delete=False) as tmp_file:
         model_local_path = tmp_file.name
         logger.info(f"tmp_file.name={model_local_path}")
         with tqdm(total=file_size, unit='B', unit_scale=True, desc='Téléchargement') as pbar:
