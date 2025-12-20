@@ -18,6 +18,7 @@ import logging
 import tempfile
 from pathlib import Path
 from tqdm import tqdm
+from contextlib import asynccontextmanager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,8 +33,6 @@ MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI","https://gviel-mlflow37.hf
 #structure MLFlow URI : s3://<bucket-name>/<mlflow_dir_name>/<experiment_id>/models/m-<model-uuid>/artifacts/data/model.pth
 MLFLOW_MODEL_URI = os.getenv("MLFLOW_MODEL_URI", "s3://aws-s3-mlflow/mlflow-artifacts/3/models/m-46e598be60f940849247fc01cf53dc3c/artifacts/data/model.pth")
 DATASET_NAME = os.getenv("DATASET_NAME", "kaggle")
-
-app = FastAPI(title="VitiScan Diagno API")
 
 def load_disease(bucket_name:str, dataset_name:str) -> dict:
     '''
@@ -181,6 +180,14 @@ async def shutdown():
     ''' Code de sortie de l'API '''
     logger.info("API shutdown")
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await startup()  # Appel de la fonction de démarrage
+    yield  # Indique que l'application est prête
+    await shutdown()  # Appel de la fonction de nettoyage
+
+app = FastAPI(lifespan=lifespan, title="VitiScan Diagno API")
+
 @app.get("/")
 def root():
     return {"message": "Vitiscan Diagno API is running"}
@@ -237,13 +244,6 @@ async def diagno(file: UploadFile = File(...)):
             predictions = predictions,
             model_version = MODEL_NAME
         )
-
-#@app.lifecycle()
-@app.lifespan()
-async def lifespan(app):
-    await startup()  # Appel de la fonction de démarrage
-    yield  # Indique que l'application est prête
-    await shutdown()  # Appel de la fonction de nettoyage
 
 if __name__ == "__main__":
     # method called only in local mode
