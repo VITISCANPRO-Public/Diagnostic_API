@@ -157,7 +157,7 @@ async def startup():
         MODEL_ARTIFACT_ROOT = '/'.join(mlflow_model_uri_splitted[1:6])
 
         # chargement des maladies correspondant au modèle
-        load_disease(bucket_name=s3_bucket_name, dataset_name=DATASET_NAME)
+        DISEASES = load_disease(bucket_name=s3_bucket_name, dataset_name=DATASET_NAME)
 
         # transformation à appliquer pour la prédiction (sans le random ColorJitter)
         TRANSFORM = transforms.Compose([
