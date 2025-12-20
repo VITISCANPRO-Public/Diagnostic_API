@@ -66,10 +66,12 @@ def load_model_from_s3(s3_bucket_name:str, s3_artifact_uri:str):
     response = S3_CLIENT.head_object(Bucket=s3_bucket_name, Key=s3_artifact_uri)
     file_size = response['ContentLength']
     logger.info(f"model_file_size = {file_size}")
-
+    logger.debug(f"Bucket={s3_bucket_name}")
+    logger.info(f"Key={s3_artifact_uri}")
     # téléchargement vers un fichier temporaire
     with tempfile.NamedTemporaryFile(prefix="model", text=False) as tmp_file:
         model_local_path = tmp_file.name
+        logger.info(f"tmp_file.name={model_local_path}")
         with tqdm(total=file_size, unit='B', unit_scale=True, desc='Téléchargement') as pbar:
             S3_CLIENT.download_file(
                 s3_bucket_name,
@@ -171,8 +173,8 @@ async def startup():
 
         # fermeture du client S3
         S3_CLIENT.close()
-    except:
-        logger.error("Error during init of API diagno")
+    except Exception as e:
+        logger.error("Error during init of API diagno:", e)
     finally:
         S3_CLIENT.close()
 
