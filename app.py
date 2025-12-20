@@ -67,7 +67,7 @@ def load_disease(bucket_name:str, dataset_name:str) -> dict:
         diseases = json.loads(data)
         logger.info(f"Diseases loaded from s3://{bucket_name}/{file_path}")
     finally:
-        logger.info(json.dumps(DISEASES, indent=4, ensure_ascii=True))
+        logger.info(json.dumps(diseases, indent=4, ensure_ascii=True))
     
     return diseases    
 
