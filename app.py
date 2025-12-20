@@ -238,7 +238,8 @@ async def diagno(file: UploadFile = File(...)):
             model_version = MODEL_NAME
         )
 
-@app.lifecycle()
+#@app.lifecycle()
+@app.lifespan()
 async def lifespan(app):
     await startup()  # Appel de la fonction de démarrage
     yield  # Indique que l'application est prête
