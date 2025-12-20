@@ -109,7 +109,8 @@ def predict_image(model, input_tensor: torch.Tensor) -> list:
         model.eval()
         output = model(input_tensor)
         probs = torch.nn.functional.softmax(output, dim=1)[0]
-        predictions = [(DISEASES.keys()[i], float(probs[i])) for i in range(len(DISEASES))] # Création de la liste DiseasePrediction
+        disease_ids = list(DISEASES.keys())
+        predictions = [(disease_ids[i], float(probs[i])) for i in range(len(disease_ids))] # Création de la liste DiseasePrediction
         predictions.sort(key=lambda x: x[1], reverse=True) # Tri décroissante de la confiance
     return predictions
 
@@ -217,6 +218,7 @@ async def diagno(file: UploadFile = File(...)):
         contents = await file.read()
         tmp_file.write(contents)
         tmp_file_path = tmp_file.name
+        logger.info(f"Write uploaded image to {tmp_file_path}")
         predictions = []
         try:
             # on lit l'image sous forme de tensor et 
@@ -224,15 +226,16 @@ async def diagno(file: UploadFile = File(...)):
             image = to_pil_image(tensor_image) # on fait ensuite la conversion en Image PIL
             img_converted = image.convert("RGB") # on convertit en RGB
             tensor = TRANSFORM(img_converted).unsqueeze(0)
+            logger.info(f'Image RGB converted into tensor')
             # on force le modèle et les datas en CPU
             device = next(MODEL.parameters()).device
-            logger.debug(f'The model is on: {device}')
+            logger.info(f'The model {MODEL_NAME} is on: {device}')
             tensor.to(DEVICE)
             MODEL.to(DEVICE)
             # Réalisation de la prédiction
             raw_predictions = predict_image(MODEL, tensor)
             predictions = [DiseasePrediction(disease=d, confidence=c) for d, c in raw_predictions]
-            tmp_file.close()
+            #tmp_file.close()
         except:
             return JSONResponse(status_code=500, content={"message": "Predict error in API diagno"})
         finally:
