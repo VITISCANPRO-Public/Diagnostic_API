@@ -38,7 +38,7 @@ def load_disease(bucket_name:str, dataset_name:str) -> dict:
     '''
     Chargement des maladies à partir du bucket S3.
 
-    On récupère un fichier vitiscan-data/diseases-{DATASET_NAME}.json que l'on
+    On récupère un fichier diseases-{DATASET_NAME}.json que l'on
     charge dans un dictionnaire global DISEASES={ 'disease1_name' : 'disease1_translated', ...}
 
     :param bucket_name: nom du bucket S3
@@ -48,14 +48,27 @@ def load_disease(bucket_name:str, dataset_name:str) -> dict:
     
     '''
     diseases = { 'N/A' : 'N/A' }
-    file_path = f'vitiscan-data/diseases-{dataset_name}.json'
-    try:
+    
+    disease_filename = f'diseases-{dataset_name}.json'
+    extra_files_dir = f'{MODEL_ARTIFACT_ROOT}/extra_files'
+    file_path = f'{extra_files_dir}/{disease_filename}'
+
+    try:    
         response = S3_CLIENT.get_object(Bucket=bucket_name, Key=file_path)
         data = response['Body'].read().decode('utf-8')
         diseases = json.loads(data)
+        logger.info(f"Diseases loaded from s3://{bucket_name}/{file_path}")
     except:
+        # solution de repli
         logger.error(f'Impossible to retrieve diseases from s3://{bucket_name}/{file_path}')
-        
+        file_path = f'vitiscan-data/diseases-{dataset_name}.json'
+        response = S3_CLIENT.get_object(Bucket=bucket_name, Key=file_path)
+        data = response['Body'].read().decode('utf-8')
+        diseases = json.loads(data)
+        logger.info(f"Diseases loaded from s3://{bucket_name}/{file_path}")
+    finally:
+        logger.info(json.dumps(DISEASES, indent=4, ensure_ascii=True))
+    
     return diseases    
 
 def load_model_from_s3(s3_bucket_name:str, s3_artifact_uri:str):
@@ -114,11 +127,10 @@ async def startup():
     # declare global vars
     global S3_CLIENT
     global DISEASES
-    #global EXPERIMENT
-    #global EXPERIMENT_NAME
     global MODEL
     global MODEL_ID
     global MODEL_NAME
+    global MODEL_ARTIFACT_ROOT
     global TRANSFORM
     
     try:
@@ -142,24 +154,10 @@ async def startup():
         logged_model = mlflow.get_logged_model(MODEL_ID)
         MODEL_NAME = logged_model.name
         logger.info(f"MODEL_NAME={MODEL_NAME}")
-        #EXPERIMENT = mlflow.get_experiment(experiment_id)
-        #EXPERIMENT_NAME = EXPERIMENT.name
-        #logger.info(f"EXPERIMENT_NAME=%", EXPERIMENT_NAME)
+        MODEL_ARTIFACT_ROOT = '/'.join(mlflow_model_uri_splitted[1:6])
 
         # chargement des maladies correspondant au modèle
-        try:
-            # on essaye de charger à partir des extra-files du modèle
-            disease_filename = 'diseases-{DATASET_NAME}.json'
-            extra_files_dir = '/'.join(mlflow_model_uri_splitted[1:6]+['extra_files'])
-            file_path = f'{extra_files_dir}/{disease_filename}'
-            DISEASES = load_disease(bucket_name=s3_bucket_name, file_path=file_path)
-        except:
-            # sinon on va chercher à la base du bucket dans vitiscan-data
-            file_path=f'vitiscan-data/diseases-{DATASET_NAME}.json'
-            DISEASES = load_disease(bucket_name=s3_bucket_name, file_path=file_path)
-        finally:
-            logger.info("Disease dictionnary downloaded from :", file_path)
-            logger.info(json.dumps(DISEASES, indent=4, ensure_ascii=True))
+        load_disease(bucket_name=s3_bucket_name, dataset_name=DATASET_NAME)
 
         # transformation à appliquer pour la prédiction (sans le random ColorJitter)
         TRANSFORM = transforms.Compose([
