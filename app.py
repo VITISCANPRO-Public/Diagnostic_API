@@ -49,7 +49,7 @@ def load_disease(bucket_name:str, dataset_name:str) -> dict:
     '''
     diseases = { 'N/A' : 'N/A' }
     
-    disease_filename = f'diseases-{dataset_name}.json'
+    disease_filename = f'disease-{dataset_name}.json'
     extra_files_dir = f'{MODEL_ARTIFACT_ROOT}/extra_files'
     file_path = f'{extra_files_dir}/{disease_filename}'
 
@@ -61,7 +61,7 @@ def load_disease(bucket_name:str, dataset_name:str) -> dict:
     except:
         # solution de repli
         logger.error(f'Impossible to retrieve diseases from s3://{bucket_name}/{file_path}')
-        file_path = f'vitiscan-data/diseases-{dataset_name}.json'
+        file_path = f'vitiscan-data/{disease_filename}'
         response = S3_CLIENT.get_object(Bucket=bucket_name, Key=file_path)
         data = response['Body'].read().decode('utf-8')
         diseases = json.loads(data)
