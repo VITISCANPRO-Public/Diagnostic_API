@@ -1,24 +1,39 @@
+"""
+====================================================================================================
+                                    DIAGNOSTIC API - Vitiscan
+         REST API for grape leaf disease classification using a fine-tuned CNN model
+====================================================================================================
+"""
+
+#                                         LIBRARIES IMPORT
+# ================================================================================================
+
 import os
 import json
 import tempfile
+import logging
 import boto3
-from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import JSONResponse
-from schemas import PredictionResponse, DiseasePrediction, DiseasesResponse
-import uvicorn
 import mlflow
-from PIL import Image
 import torch
 import torchvision.transforms as transforms
-#from torchvision.transforms import v2
+import uvicorn
+
+from pathlib import Path
+from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+from tqdm import tqdm
+
+from fastapi import FastAPI, UploadFile, File
+from fastapi.responses import JSONResponse
+from PIL import Image
 from torchvision.io import read_image
 from torchvision.transforms.functional import to_pil_image
-import logging
-import tempfile
-from pathlib import Path
-from tqdm import tqdm
-from contextlib import asynccontextmanager
+
+from schemas import PredictionResponse, DiseasePrediction, DiseasesResponse
+
+
+#                                         CONFIGURATION
+# ================================================================================================
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,226 +41,227 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# récupération config par vars d'env
 load_dotenv()
-DEVICE='cpu'
-MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI","https://gviel-mlflow37.hf.space")
-#structure MLFlow URI : s3://<bucket-name>/<mlflow_dir_name>/<experiment_id>/models/m-<model-uuid>/artifacts/data/model.pth
-MLFLOW_MODEL_URI = os.getenv("MLFLOW_MODEL_URI", "s3://aws-s3-mlflow/mlflow-artifacts/3/models/m-46e598be60f940849247fc01cf53dc3c/artifacts/data/model.pth")
-DATASET_NAME = os.getenv("DATASET_NAME", "kaggle")
 
-def load_disease(bucket_name:str, dataset_name:str) -> dict:
-    '''
-    Chargement des maladies à partir du bucket S3.
+DEVICE = 'cpu'
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI")
+MLFLOW_MODEL_URI = os.getenv("MLFLOW_MODEL_URI")
+DATASET_NAME = os.getenv("DATASET_NAME", "inrae")
+MODEL_ARTIFACT_ROOT = os.getenv("MODEL_ARTIFACT_ROOT")
 
-    On récupère un fichier diseases-{DATASET_NAME}.json que l'on
-    charge dans un dictionnaire global DISEASES={ 'disease1_name' : 'disease1_translated', ...}
 
-    :param bucket_name: nom du bucket S3
-    :type bucket_name: str
-    :param dataset_name: nom du dataset
-    :type file_path: str
-    
-    '''
-    diseases = { 'N/A' : 'N/A' }
-    
+#                                         HELPER FUNCTIONS
+# ================================================================================================
+
+def load_diseases(bucket_name: str, dataset_name: str) -> dict:
+    """
+    Loads the disease label dictionary from S3.
+
+    Retrieves a disease-{dataset_name}.json file and returns it as a dictionary:
+    { 'disease_scientific_name': 'disease_common_name', ... }
+
+    Args:
+        bucket_name: S3 bucket name
+        dataset_name: Dataset identifier ('inrae' or 'kaggle')
+
+    Returns:
+        Dictionary mapping disease keys to human-readable names
+    """
+    diseases = {'N/A': 'N/A'}
     disease_filename = f'disease-{dataset_name}.json'
-    extra_files_dir = f'{MODEL_ARTIFACT_ROOT}/extra_files'
-    file_path = f'{extra_files_dir}/{disease_filename}'
 
-    try:    
-        response = S3_CLIENT.get_object(Bucket=bucket_name, Key=file_path)
-        data = response['Body'].read().decode('utf-8')
-        diseases = json.loads(data)
-        logger.info(f"Diseases loaded from s3://{bucket_name}/{file_path}")
-    except:
-        # solution de repli
-        logger.error(f'Impossible to retrieve diseases from s3://{bucket_name}/{file_path}')
-        file_path = f'vitiscan-data/{disease_filename}'
-        response = S3_CLIENT.get_object(Bucket=bucket_name, Key=file_path)
-        data = response['Body'].read().decode('utf-8')
-        diseases = json.loads(data)
-        logger.info(f"Diseases loaded from s3://{bucket_name}/{file_path}")
-    finally:
-        logger.info(json.dumps(diseases, indent=4, ensure_ascii=True))
-    
-    return diseases    
+    # Primary path: retrieve from model artifact directory
+    primary_path = f'{MODEL_ARTIFACT_ROOT}/extra_files/{disease_filename}'
+    fallback_path = f'vitiscan-data/{disease_filename}'
 
-def load_model_from_s3(s3_bucket_name:str, s3_artifact_uri:str):
-    '''
-    Chargement du modèle à partir du bucket S3
-    '''
-    # calcul taille du fichier du modèle
-    response = S3_CLIENT.head_object(Bucket=s3_bucket_name, Key=s3_artifact_uri)
-    file_size = response['ContentLength']
-    logger.info(f"model_file_size = {file_size}")
-    # téléchargement vers un fichier temporaire
-    with tempfile.NamedTemporaryFile(prefix="model", mode='wb', suffix='.pth', delete=False) as tmp_file:
-        model_local_path = tmp_file.name
-        logger.info(f"tmp_file.name={model_local_path}")
-        with tqdm(total=file_size, unit='B', unit_scale=True, desc='Téléchargement') as pbar:
-            S3_CLIENT.download_file(
-                s3_bucket_name,
-                s3_artifact_uri,
-                model_local_path,
-                Callback=lambda bytes_transferred: pbar.update(bytes_transferred)
-        )
-        logger.info(f"Model downloaded to {model_local_path}")
+    for s3_path in [primary_path, fallback_path]:
+        try:
+            response = S3_CLIENT.get_object(Bucket=bucket_name, Key=s3_path)
+            data = response['Body'].read().decode('utf-8')
+            diseases = json.loads(data)
+            logger.info(f"Diseases loaded from s3://{bucket_name}/{s3_path}")
+            logger.info(json.dumps(diseases, indent=4, ensure_ascii=True))
+            return diseases
+        except Exception as e:
+            logger.warning(f"Could not load diseases from s3://{bucket_name}/{s3_path}: {e}")
 
-        # chargement du modèle en mémoire en forçant vers le CPU
-        model = torch.load(model_local_path, map_location=DEVICE)
-        logger.info(f"Model successfuly loaded from {model_local_path}")
-        return model
+    logger.error("Failed to load diseases from all S3 paths. Using default N/A.")
+    return diseases
+
+
 
 def predict_image(model, input_tensor: torch.Tensor) -> list:
-    '''
-        Docstring pour predict_image
-    
-        :param model: Description
-        :param input_tensor: Description
-        :type input_tensor: torch.Tensor
-    '''
+    """
+    Runs inference on a preprocessed image tensor.
+
+    Args:
+        model: Loaded PyTorch model
+        input_tensor: Preprocessed image tensor of shape (1, 3, H, W)
+
+    Returns:
+        List of (disease_key, confidence_score) tuples sorted by confidence descending
+    """
     with torch.no_grad():
         model.eval()
         output = model(input_tensor)
         probs = torch.nn.functional.softmax(output, dim=1)[0]
-        disease_ids = list(DISEASES.keys())
-        predictions = [(disease_ids[i], float(probs[i])) for i in range(len(disease_ids))] # Création de la liste DiseasePrediction
-        predictions.sort(key=lambda x: x[1], reverse=True) # Tri décroissante de la confiance
+        disease_keys = list(DISEASES.keys())
+        predictions = [
+            (disease_keys[i], float(probs[i]))
+            for i in range(len(disease_keys))
+        ]
+        predictions.sort(key=lambda x: x[1], reverse=True)
     return predictions
 
+
+#                                         STARTUP / SHUTDOWN
+# ================================================================================================
+
 async def startup():
-    '''
-    Méthode de démarrage de l'API :
-    - création bucket S3
-    - récupération du model sur MLFlow
-    - récupération du fichier de config des maladies
-    - instanciation du tranform pour les images avant le predict
-    '''
-    # Code de configuration ici
-    print("API startup and configuration")
-    
-    # declare global vars
-    global S3_CLIENT
-    global DISEASES
-    global MODEL
-    global MODEL_ID
-    global MODEL_NAME
-    global MODEL_ARTIFACT_ROOT
-    global TRANSFORM
-    
+    """
+    API startup handler:
+    - Loads the CNN model directly from MLflow model registry
+    - Loads the disease label dictionary from S3
+    - Initializes the image preprocessing pipeline
+    """
+    logger.info("Starting Vitiscan Diagnostic API...")
+
+    global S3_CLIENT, DISEASES, MODEL, MODEL_NAME, TRANSFORM
+
     try:
-        # create s3 client
+        # Connect to MLflow
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        logger.info(f"MLflow tracking URI: {MLFLOW_TRACKING_URI}")
+
+        # Load model directly from MLflow registry
+        # MLFLOW_MODEL_URI format: "models:/model_name/version"
+        MODEL = mlflow.pytorch.load_model(MLFLOW_MODEL_URI, map_location=DEVICE)
+        MODEL_NAME = MLFLOW_MODEL_URI.split("/")[1]
+        logger.info(f"Model '{MODEL_NAME}' loaded from MLflow: {MLFLOW_MODEL_URI}")
+
+        # Load disease labels from S3
         S3_CLIENT = boto3.client('s3')
+        S3_BUCKET_NAME= os.getenv("S3_BUCKET_NAME")
+        DISEASES = load_diseases(bucket_name=S3_BUCKET_NAME, dataset_name=DATASET_NAME)
+        S3_CLIENT.close()
 
-        # récupération des configs S3 à partir de l'URI du model
-        mlflow_model_uri_splitted = MLFLOW_MODEL_URI.replace("s3://","").split("/")
-        s3_bucket_name = mlflow_model_uri_splitted[0]
-        s3_artifact_uri = MLFLOW_MODEL_URI.replace("s3://" + s3_bucket_name + "/", "")
-        logger.info(f"s3_bucket_name={s3_bucket_name}")
-        logger.info(f"s3_artifact_uri={s3_artifact_uri}")
-
-        # chargement du modèle
-        MODEL = load_model_from_s3(s3_bucket_name, s3_artifact_uri)
-
-        # récupération de l'experiment_id et experiment_name
-        #experiment_id = mlflow_model_uri_splitted[2]
-        MODEL_ID = mlflow_model_uri_splitted[4]
-        logger.info(f"MODEL_ID={MODEL_ID}")
-        logged_model = mlflow.get_logged_model(MODEL_ID)
-        MODEL_NAME = logged_model.name
-        logger.info(f"MODEL_NAME={MODEL_NAME}")
-        MODEL_ARTIFACT_ROOT = '/'.join(mlflow_model_uri_splitted[1:6])
-
-        # chargement des maladies correspondant au modèle
-        DISEASES = load_disease(bucket_name=s3_bucket_name, dataset_name=DATASET_NAME)
-
-        # transformation à appliquer pour la prédiction (sans le random ColorJitter)
+        # Image preprocessing pipeline (no augmentation for inference)
         TRANSFORM = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                    std=[0.229, 0.224, 0.225])
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225]
+            )
         ])
 
-        # fermeture du client S3
-        S3_CLIENT.close()
+        logger.info("API startup complete.")
+
     except Exception as e:
-        logger.error("Error during init of API diagno:", e)
-    finally:
-        S3_CLIENT.close()
+        logger.error(f"Error during API startup: {e}")
+        raise
+
 
 async def shutdown():
-    ''' Code de sortie de l'API '''
-    logger.info("API shutdown")
+    """API shutdown handler."""
+    logger.info("Shutting down Vitiscan Diagnostic API.")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await startup()  # Appel de la fonction de démarrage
-    yield  # Indique que l'application est prête
-    await shutdown()  # Appel de la fonction de nettoyage
+    await startup()
+    yield
+    await shutdown()
 
-app = FastAPI(lifespan=lifespan, title="VitiScan Diagno API")
+
+#                                         API ENDPOINTS
+# ================================================================================================
+
+app = FastAPI(
+    lifespan=lifespan,
+    title="Vitiscan Diagnostic API",
+    description="Grape leaf disease classification using fine-tuned CNN models.",
+    version="1.0.0"
+)
+
 
 @app.get("/")
 def root():
-    return {"message": "Vitiscan Diagno API is running"}
+    """Health check endpoint."""
+    return {"message": "Vitiscan Diagnostic API is running", "status": "ok"}
+
 
 @app.get("/diseases", response_model=DiseasesResponse)
-async def diseases():
+async def get_diseases():
+    """
+    Returns the list of detectable diseases and their labels.
+    """
     return DiseasesResponse(
         diseases=DISEASES,
         dataset_name=DATASET_NAME
     )
 
+
 @app.post("/diagno", response_model=PredictionResponse)
 async def diagno(file: UploadFile = File(...)):
-    '''
-    Diagnostic à partir d'un fichier image envoyé par l'interface web.
-    
-    :param file: Description
-    :type file: UploadFile
-    '''
-    if file is None:
-        return JSONResponse(status_code=400, content={"message": "Aucun fichier reçu"})
-    
-    # on devrait récupèrer l'image sous forme de bytes directement et créer l'image PIL mais ne fonctionne pas
-    # contents = await file.read()
-    #pil_image = Image.open(io.BytesIO(contents))
+    """
+    Runs disease diagnosis on an uploaded grape leaf image.
 
-    # pour l'instant obligé de passer par un fichier temporaire
+    Accepts a JPEG or PNG image file and returns a ranked list of
+    disease predictions with confidence scores.
+
+    Args:
+        file: Uploaded image file (JPEG or PNG)
+
+    Returns:
+        PredictionResponse with ranked disease predictions and model version
+    """
+    if file is None:
+        return JSONResponse(status_code=400, content={"message": "No file received"})
+
     with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
         contents = await file.read()
         tmp_file.write(contents)
         tmp_file_path = tmp_file.name
-        logger.info(f"Write uploaded image to {tmp_file_path}")
-        predictions = []
+        logger.info(f"Uploaded image saved to temporary file: {tmp_file_path}")
+
         try:
-            # on lit l'image sous forme de tensor et 
+            # Load and preprocess image
             tensor_image = read_image(tmp_file_path)
-            image = to_pil_image(tensor_image) # on fait ensuite la conversion en Image PIL
-            img_converted = image.convert("RGB") # on convertit en RGB
-            tensor = TRANSFORM(img_converted).unsqueeze(0)
-            logger.info(f'Image RGB converted into tensor')
-            # on force le modèle et les datas en CPU
-            device = next(MODEL.parameters()).device
-            logger.info(f'The model {MODEL_NAME} is on: {device}')
-            tensor.to(DEVICE)
+            pil_image    = to_pil_image(tensor_image).convert("RGB")
+            tensor       = TRANSFORM(pil_image).unsqueeze(0)
+            logger.info("Image converted to RGB tensor successfully")
+
+            # Move model and tensor to target device
             MODEL.to(DEVICE)
-            # Réalisation de la prédiction
+            tensor = tensor.to(DEVICE)
+            logger.info(f"Running inference with model '{MODEL_NAME}' on device: {DEVICE}")
+
+            # Run inference
             raw_predictions = predict_image(MODEL, tensor)
-            predictions = [DiseasePrediction(disease=d, confidence=c) for d, c in raw_predictions]
-            #tmp_file.close()
-        except:
-            return JSONResponse(status_code=500, content={"message": "Predict error in API diagno"})
+            predictions = [
+                DiseasePrediction(disease=d, confidence=c)
+                for d, c in raw_predictions
+            ]
+
+        except Exception as e:
+            logger.error(f"Prediction error: {e}")
+            return JSONResponse(
+                status_code=500,
+                content={"message": "Prediction failed. See server logs for details."}
+            )
         finally:
             os.unlink(tmp_file_path)
-    
+            logger.info(f"Temporary file deleted: {tmp_file_path}")
+
     return PredictionResponse(
-            predictions = predictions,
-            model_version = MODEL_NAME
-        )
+        predictions=predictions,
+        model_version=MODEL_NAME
+    )
+
+
+#                                         ENTRY POINT
+# ================================================================================================
 
 if __name__ == "__main__":
-    # method called only in local mode
     uvicorn.run("app:app", host="127.0.0.1", port=4000, reload=True)
