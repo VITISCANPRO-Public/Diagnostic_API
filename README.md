@@ -1,3 +1,13 @@
+---
+title: VITISCANPRO_DIAGNO_API
+emoji: 🍇
+colorFrom: green
+colorTo: purple
+sdk: docker
+app_file: app.py
+pinned: false
+---
+
 # Vitiscan — Diagnostic API
 
 REST API for grape leaf disease classification using a fine-tuned CNN model.
