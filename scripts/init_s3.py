@@ -11,13 +11,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DISEASES = {
-    "colomerus_vitis":            "Erinose",
-    "elsinoe_ampelina":           "Anthracnose",
-    "erysiphe_necator":           "Oidium",
-    "guignardia_bidwellii":       "Pourriture noire",
-    "phaeomoniella_chlamydospora": "Esca",
-    "plasmopara_viticola":        "Mildiou",
-    "healthy":                    "Healthy"
+    "colomerus_vitis":             "Erinose",
+    "elsinoe_ampelina":            "Anthracnose",
+    "erysiphe_necator":            "Oidium",
+    "guignardia_bidwellii":        "Black rot",
+    "healthy":                     "Healthy",      
+    "phaeomoniella_chlamydospora": "Esca",          
+    "plasmopara_viticola":         "Mildiou"        
 }
 
 def upload_diseases(bucket_name: str, dataset_name: str) -> None:

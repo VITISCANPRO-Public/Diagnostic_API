@@ -90,14 +90,15 @@ def load_diseases(bucket_name: str, dataset_name: str) -> dict:
 
 
 
-def predict_image(model, input_tensor: torch.Tensor) -> list:
+def predict_image(model, input_tensor: torch.Tensor,class_names:list) -> list:
     """
     Runs inference on a preprocessed image tensor.
 
     Args:
         model: Loaded PyTorch model
         input_tensor: Preprocessed image tensor of shape (1, 3, H, W)
-
+        class_names: Ordered list from ImageFolder (alphabetical order)
+    
     Returns:
         List of (disease_key, confidence_score) tuples sorted by confidence descending
     """
@@ -105,10 +106,9 @@ def predict_image(model, input_tensor: torch.Tensor) -> list:
         model.eval()
         output = model(input_tensor)
         probs = torch.nn.functional.softmax(output, dim=1)[0]
-        disease_keys = list(DISEASES.keys())
         predictions = [
-            (disease_keys[i], float(probs[i]))
-            for i in range(len(disease_keys))
+             (class_names[i], float(probs[i]))
+            for i in range(len(class_names))
         ]
         predictions.sort(key=lambda x: x[1], reverse=True)
     return predictions
@@ -126,7 +126,18 @@ async def startup():
     """
     logger.info("Starting Vitiscan Diagnostic API...")
 
-    global S3_CLIENT, DISEASES, MODEL, MODEL_NAME, TRANSFORM
+    global S3_CLIENT, DISEASES, MODEL, MODEL_NAME, TRANSFORM, CLASS_NAMES
+
+    CLASS_NAMES = sorted([
+        "colomerus_vitis",
+        "elsinoe_ampelina", 
+        "erysiphe_necator",
+        "guignardia_bidwellii",
+        "healthy",
+        "phaeomoniella_chlamydospora",
+        "plasmopara_viticola"
+    ])
+
 
     try:
         # Connect to MLflow
@@ -238,7 +249,7 @@ async def diagno(file: UploadFile = File(...)):
             logger.info(f"Running inference with model '{MODEL_NAME}' on device: {DEVICE}")
 
             # Run inference
-            raw_predictions = predict_image(MODEL, tensor)
+            raw_predictions = predict_image(MODEL, tensor,CLASS_NAMES)
             predictions = [
                 DiseasePrediction(disease=d, confidence=c)
                 for d, c in raw_predictions
