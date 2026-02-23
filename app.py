@@ -15,6 +15,7 @@ import logging
 import boto3
 import mlflow
 import torch
+import torch.nn as nn
 import torchvision.transforms as transforms
 import uvicorn
 
@@ -45,9 +46,45 @@ load_dotenv()
 
 DEVICE = 'cpu'
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI")
-MLFLOW_MODEL_URI = os.getenv("MLFLOW_MODEL_URI")
-DATASET_NAME = os.getenv("DATASET_NAME", "inrae")
+MLFLOW_MODEL_URI    = os.getenv("MLFLOW_MODEL_URI")
+DATASET_NAME        = os.getenv("DATASET_NAME", "inrae")
 MODEL_ARTIFACT_ROOT = os.getenv("MODEL_ARTIFACT_ROOT")
+
+# ── The 7 INRAE disease classes (alphabetical order, matches ImageFolder) ──────
+CLASS_NAMES = sorted([
+    "colomerus_vitis",
+    "elsinoe_ampelina",
+    "erysiphe_necator",
+    "guignardia_bidwellii",
+    "healthy",
+    "phaeomoniella_chlamydospora",
+    "plasmopara_viticola",
+])
+
+
+#                                         MOCK MODEL (CI / TESTING)
+# ================================================================================================
+
+class MockModel(nn.Module):
+    """
+    Lightweight mock model used exclusively in CI (GitHub Actions).
+
+    Returns uniform logits across all 7 INRAE classes so that softmax
+    produces equal probabilities (~0.143 per class). This is enough to
+    validate that all API endpoints work correctly without needing a GPU
+    or access to MLflow / S3 secrets.
+
+    Activated when the environment variable TESTING=true is set.
+    Never used in production.
+    """
+    def __init__(self, num_classes: int = 7):
+        super().__init__()
+        self.num_classes = num_classes
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch_size = x.shape[0]
+        # Uniform logits → softmax gives 1/7 per class
+        return torch.ones(batch_size, self.num_classes)
 
 
 #                                         HELPER FUNCTIONS
@@ -71,13 +108,13 @@ def load_diseases(bucket_name: str, dataset_name: str) -> dict:
     disease_filename = f'disease-{dataset_name}.json'
 
     # Primary path: retrieve from model artifact directory
-    primary_path = f'{MODEL_ARTIFACT_ROOT}/extra_files/{disease_filename}'
+    primary_path  = f'{MODEL_ARTIFACT_ROOT}/extra_files/{disease_filename}'
     fallback_path = f'vitiscan-data/{disease_filename}'
 
     for s3_path in [primary_path, fallback_path]:
         try:
             response = S3_CLIENT.get_object(Bucket=bucket_name, Key=s3_path)
-            data = response['Body'].read().decode('utf-8')
+            data     = response['Body'].read().decode('utf-8')
             diseases = json.loads(data)
             logger.info(f"Diseases loaded from s3://{bucket_name}/{s3_path}")
             logger.info(json.dumps(diseases, indent=4, ensure_ascii=True))
@@ -89,8 +126,7 @@ def load_diseases(bucket_name: str, dataset_name: str) -> dict:
     return diseases
 
 
-
-def predict_image(model, input_tensor: torch.Tensor,class_names:list) -> list:
+def predict_image(model, input_tensor: torch.Tensor, class_names: list) -> list:
     """
     Runs inference on a preprocessed image tensor.
 
@@ -98,16 +134,16 @@ def predict_image(model, input_tensor: torch.Tensor,class_names:list) -> list:
         model: Loaded PyTorch model
         input_tensor: Preprocessed image tensor of shape (1, 3, H, W)
         class_names: Ordered list from ImageFolder (alphabetical order)
-    
+
     Returns:
         List of (disease_key, confidence_score) tuples sorted by confidence descending
     """
     with torch.no_grad():
         model.eval()
         output = model(input_tensor)
-        probs = torch.nn.functional.softmax(output, dim=1)[0]
+        probs  = torch.nn.functional.softmax(output, dim=1)[0]
         predictions = [
-             (class_names[i], float(probs[i]))
+            (class_names[i], float(probs[i]))
             for i in range(len(class_names))
         ]
         predictions.sort(key=lambda x: x[1], reverse=True)
@@ -119,58 +155,73 @@ def predict_image(model, input_tensor: torch.Tensor,class_names:list) -> list:
 
 async def startup():
     """
-    API startup handler:
-    - Loads the CNN model directly from MLflow model registry
+    API startup handler.
+
+    Two modes depending on the TESTING environment variable:
+
+    ── Production mode (TESTING unset) ──────────────────────────────────────────
+    - Loads the real ResNet18 model from MLflow model registry
     - Loads the disease label dictionary from S3
     - Initializes the image preprocessing pipeline
+
+    ── Test mode (TESTING=true, used by GitHub Actions) ─────────────────────────
+    - Loads a lightweight MockModel (no GPU, no cloud credentials needed)
+    - Uses a hardcoded disease dictionary with the 7 INRAE classes
+    - Skips all S3 and MLflow calls
     """
     logger.info("Starting Vitiscan Diagnostic API...")
 
-    global S3_CLIENT, DISEASES, MODEL, MODEL_NAME, TRANSFORM, CLASS_NAMES
+    global S3_CLIENT, DISEASES, MODEL, MODEL_NAME, TRANSFORM
 
-    CLASS_NAMES = sorted([
-        "colomerus_vitis",
-        "elsinoe_ampelina", 
-        "erysiphe_necator",
-        "guignardia_bidwellii",
-        "healthy",
-        "phaeomoniella_chlamydospora",
-        "plasmopara_viticola"
+    TESTING = os.getenv("TESTING", "false").lower() == "true"
+
+    # ── Image preprocessing pipeline (identical in both modes) ────────────────
+    TRANSFORM = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        )
     ])
 
+    if TESTING:
+        # ── Test mode ─────────────────────────────────────────────────────────
+        logger.info("TESTING=true detected — loading mock model for CI environment")
 
-    try:
-        # Connect to MLflow
-        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-        logger.info(f"MLflow tracking URI: {MLFLOW_TRACKING_URI}")
+        MODEL      = MockModel(num_classes=len(CLASS_NAMES))
+        MODEL_NAME = "mock-model-ci"
 
-        # Load model directly from MLflow registry
-        # MLFLOW_MODEL_URI format: "models:/model_name/version"
-        MODEL = mlflow.pytorch.load_model(MLFLOW_MODEL_URI, map_location=DEVICE)
-        MODEL_NAME = MLFLOW_MODEL_URI.split("/")[1]
-        logger.info(f"Model '{MODEL_NAME}' loaded from MLflow: {MLFLOW_MODEL_URI}")
+        # Hardcoded disease dictionary with the 7 INRAE classes
+        DISEASES = {cls: cls.replace("_", " ").title() for cls in CLASS_NAMES}
 
-        # Load disease labels from S3
-        S3_CLIENT = boto3.client('s3')
-        S3_BUCKET_NAME= os.getenv("S3_BUCKET_NAME")
-        DISEASES = load_diseases(bucket_name=S3_BUCKET_NAME, dataset_name=DATASET_NAME)
-        S3_CLIENT.close()
+        logger.info(f"Mock model loaded. Classes: {CLASS_NAMES}")
+        logger.info("API startup complete (test mode).")
 
-        # Image preprocessing pipeline (no augmentation for inference)
-        TRANSFORM = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225]
-            )
-        ])
+    else:
+        # ── Production mode ───────────────────────────────────────────────────
+        try:
+            # Connect to MLflow
+            mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+            logger.info(f"MLflow tracking URI: {MLFLOW_TRACKING_URI}")
 
-        logger.info("API startup complete.")
+            # Load model directly from MLflow registry
+            # MLFLOW_MODEL_URI format: "models:/model_name/version"
+            MODEL      = mlflow.pytorch.load_model(MLFLOW_MODEL_URI, map_location=DEVICE)
+            MODEL_NAME = MLFLOW_MODEL_URI.split("/")[1]
+            logger.info(f"Model '{MODEL_NAME}' loaded from MLflow: {MLFLOW_MODEL_URI}")
 
-    except Exception as e:
-        logger.error(f"Error during API startup: {e}")
-        raise
+            # Load disease labels from S3
+            S3_CLIENT     = boto3.client('s3')
+            S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+            DISEASES      = load_diseases(bucket_name=S3_BUCKET_NAME, dataset_name=DATASET_NAME)
+            S3_CLIENT.close()
+
+            logger.info("API startup complete (production mode).")
+
+        except Exception as e:
+            logger.error(f"Error during API startup: {e}")
+            raise
 
 
 async def shutdown():
@@ -231,7 +282,7 @@ async def diagno(file: UploadFile = File(...)):
         return JSONResponse(status_code=400, content={"message": "No file received"})
 
     with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
-        contents = await file.read()
+        contents     = await file.read()
         tmp_file.write(contents)
         tmp_file_path = tmp_file.name
         logger.info(f"Uploaded image saved to temporary file: {tmp_file_path}")
@@ -249,7 +300,7 @@ async def diagno(file: UploadFile = File(...)):
             logger.info(f"Running inference with model '{MODEL_NAME}' on device: {DEVICE}")
 
             # Run inference
-            raw_predictions = predict_image(MODEL, tensor,CLASS_NAMES)
+            raw_predictions = predict_image(MODEL, tensor, CLASS_NAMES)
             predictions = [
                 DiseasePrediction(disease=d, confidence=c)
                 for d, c in raw_predictions
