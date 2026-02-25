@@ -19,15 +19,12 @@ import torch.nn as nn
 import torchvision.transforms as transforms
 import uvicorn
 
-from pathlib import Path
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse
 from PIL import Image
-from torchvision.io import read_image
-from torchvision.transforms.functional import to_pil_image
 
 from schemas import PredictionResponse, DiseasePrediction, DiseasesResponse
 
@@ -112,20 +109,20 @@ def load_diseases(bucket_name: str, dataset_name: str) -> dict:
     primary_path = f'{MODEL_ARTIFACT_ROOT}/extra_files/{disease_filename}'
     fallback_path = f'vitiscan-data/{disease_filename}'
 
-    with boto3.client('s3') as s3:
-        for s3_path in [primary_path, fallback_path]:
-            try:
-                response = s3.get_object(Bucket=bucket_name, Key=s3_path)
-                data = response['Body'].read().decode('utf-8')
-                diseases = json.loads(data)
-                logger.info(f"Diseases loaded from s3://{bucket_name}/{s3_path}")
-                logger.info(json.dumps(diseases, indent=4, ensure_ascii=True))
-                return diseases
-            except Exception as e:
-                logger.warning(f"Could not load diseases from s3://{bucket_name}/{s3_path}: {e}")
+    s3 = boto3.client('s3')
+    for s3_path in [primary_path, fallback_path]:
+        try:
+            response = s3.get_object(Bucket=bucket_name, Key=s3_path)
+            data = response['Body'].read().decode('utf-8')
+            diseases = json.loads(data)
+            logger.info(f"Diseases loaded from s3://{bucket_name}/{s3_path}")
+            logger.info(json.dumps(diseases, indent=4, ensure_ascii=True))
+            return diseases
+        except Exception as e:
+            logger.warning(f"Could not load diseases from s3://{bucket_name}/{s3_path}: {e}")
 
-        logger.error("Failed to load diseases from all S3 paths. Using default N/A.")
-        return diseases
+    logger.error("Failed to load diseases from all S3 paths. Using default N/A.")
+    return diseases
 
 
 def predict_image(model, input_tensor: torch.Tensor, class_names: list) -> list:
@@ -284,7 +281,8 @@ async def diagno(file: UploadFile = File(...)):
 
     with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
         contents = await file.read()
-        tmp_file.write(contents)
+        tmp_file.write(contents) # Writes into the buffer
+        tmp_file.flush()    # Forces to write into the disk
         tmp_file_path = tmp_file.name
         logger.info(f"Uploaded image saved to temporary file: {tmp_file_path}")
 
