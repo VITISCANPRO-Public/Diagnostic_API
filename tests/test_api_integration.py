@@ -30,7 +30,19 @@ from app import app
 
 client = TestClient(app)
 
-# The 7 expected INRAE classes — must match CLASS_NAMES in app.py exactly
+@pytest.fixture(scope="module", autouse=True)
+def start_app():
+    """
+    Force the FastAPI lifespan to run before any test executes.
+    Without this, startup() never runs and all global variables
+    (DISEASES, MODEL, TRANSFORM) remain undefined.
+    """
+    global client
+    with TestClient(app) as c:
+        client = c   # replace the client without lifespan
+        yield       
+                
+# The 7 expected classes — must match CLASS_NAMES in app.py exactly
 EXPECTED_CLASSES = sorted([
     "colomerus_vitis",
     "elsinoe_ampelina",
