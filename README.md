@@ -52,6 +52,7 @@ Diagnostic_API/
 ├── .env.template                   # Environment variable template
 ├── environment.yml                 # Conda environment (CPU, local development)
 ├── env_api_diagno_gpu.yml          # Conda environment (GPU, EC2 training instance)
+├── conftest.py                     # Indicates the root configuration folder for pytest
 ├── scripts/
 │   └── init_s3.py                  # One-time script: uploads disease labels to S3
 └── tests/
@@ -147,7 +148,7 @@ Copy `.env.template` to `.env` and fill in the values below.
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `MLFLOW_TRACKING_URI` | URL of the MLflow tracking server | `https://mouniat-vitiscanpro-hf.hf.space` |
-| `MLFLOW_MODEL_URI` | Model URI in MLflow registry — format: `models:/name/version` | `models:/vitiscan-resnet18/3` |
+| `MLFLOW_MODEL_URI` | Model URI in MLflow registry — format: `models:/name/version` | `models:/vitiscan-resnet18@production` |
 | `MODEL_ARTIFACT_ROOT` | S3 path to the model artifact folder (used to load `disease-inrae.json`) | `s3://vitiscanpro-bucket/mlflow-artifacts/models/RUN_ID/artifacts` |
 | `S3_BUCKET_NAME` | AWS S3 bucket name | `vitiscanpro-bucket` |
 | `DATASET_NAME` | Dataset identifier, used to load the correct disease label file | `inrae` |
