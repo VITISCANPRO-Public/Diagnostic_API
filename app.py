@@ -22,7 +22,6 @@ import uvicorn
 from pathlib import Path
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from tqdm import tqdm
 
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse
@@ -46,11 +45,13 @@ load_dotenv()
 
 DEVICE = 'cpu'
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI")
-MLFLOW_MODEL_URI    = os.getenv("MLFLOW_MODEL_URI")
-DATASET_NAME        = os.getenv("DATASET_NAME", "inrae")
+MLFLOW_MODEL_URI = os.getenv("MLFLOW_MODEL_URI")
+DATASET_NAME = os.getenv("DATASET_NAME", "inrae")
 MODEL_ARTIFACT_ROOT = os.getenv("MODEL_ARTIFACT_ROOT")
+if not MLFLOW_MODEL_URI and not os.getenv("TESTING"):
+    logger.error("MLFLOW_MODEL_URI is not set — API will crash on /diagno calls")
 
-# ── The 7 INRAE disease classes (alphabetical order, matches ImageFolder) ──────
+# ── The 7 classes (alphabetical order, matches ImageFolder) ──────
 CLASS_NAMES = sorted([
     "colomerus_vitis",
     "elsinoe_ampelina",
@@ -108,22 +109,23 @@ def load_diseases(bucket_name: str, dataset_name: str) -> dict:
     disease_filename = f'disease-{dataset_name}.json'
 
     # Primary path: retrieve from model artifact directory
-    primary_path  = f'{MODEL_ARTIFACT_ROOT}/extra_files/{disease_filename}'
+    primary_path = f'{MODEL_ARTIFACT_ROOT}/extra_files/{disease_filename}'
     fallback_path = f'vitiscan-data/{disease_filename}'
 
-    for s3_path in [primary_path, fallback_path]:
-        try:
-            response = S3_CLIENT.get_object(Bucket=bucket_name, Key=s3_path)
-            data     = response['Body'].read().decode('utf-8')
-            diseases = json.loads(data)
-            logger.info(f"Diseases loaded from s3://{bucket_name}/{s3_path}")
-            logger.info(json.dumps(diseases, indent=4, ensure_ascii=True))
-            return diseases
-        except Exception as e:
-            logger.warning(f"Could not load diseases from s3://{bucket_name}/{s3_path}: {e}")
+    with boto3.client('s3') as s3:
+        for s3_path in [primary_path, fallback_path]:
+            try:
+                response = s3.get_object(Bucket=bucket_name, Key=s3_path)
+                data = response['Body'].read().decode('utf-8')
+                diseases = json.loads(data)
+                logger.info(f"Diseases loaded from s3://{bucket_name}/{s3_path}")
+                logger.info(json.dumps(diseases, indent=4, ensure_ascii=True))
+                return diseases
+            except Exception as e:
+                logger.warning(f"Could not load diseases from s3://{bucket_name}/{s3_path}: {e}")
 
-    logger.error("Failed to load diseases from all S3 paths. Using default N/A.")
-    return diseases
+        logger.error("Failed to load diseases from all S3 paths. Using default N/A.")
+        return diseases
 
 
 def predict_image(model, input_tensor: torch.Tensor, class_names: list) -> list:
@@ -166,12 +168,12 @@ async def startup():
 
     ── Test mode (TESTING=true, used by GitHub Actions) ─────────────────────────
     - Loads a lightweight MockModel (no GPU, no cloud credentials needed)
-    - Uses a hardcoded disease dictionary with the 7 INRAE classes
+    - Uses a hardcoded dictionary with the 7 classes
     - Skips all S3 and MLflow calls
     """
     logger.info("Starting Vitiscan Diagnostic API...")
 
-    global S3_CLIENT, DISEASES, MODEL, MODEL_NAME, TRANSFORM
+    global DISEASES, MODEL, MODEL_NAME, TRANSFORM
 
     TESTING = os.getenv("TESTING", "false").lower() == "true"
 
@@ -189,10 +191,10 @@ async def startup():
         # ── Test mode ─────────────────────────────────────────────────────────
         logger.info("TESTING=true detected — loading mock model for CI environment")
 
-        MODEL      = MockModel(num_classes=len(CLASS_NAMES))
+        MODEL = MockModel(num_classes=len(CLASS_NAMES))
         MODEL_NAME = "mock-model-ci"
 
-        # Hardcoded disease dictionary with the 7 INRAE classes
+        # Hardcoded disease dictionary with the 7 classes
         DISEASES = {cls: cls.replace("_", " ").title() for cls in CLASS_NAMES}
 
         logger.info(f"Mock model loaded. Classes: {CLASS_NAMES}")
@@ -207,15 +209,14 @@ async def startup():
 
             # Load model directly from MLflow registry
             # MLFLOW_MODEL_URI format: "models:/model_name/version"
-            MODEL      = mlflow.pytorch.load_model(MLFLOW_MODEL_URI, map_location=DEVICE)
-            MODEL_NAME = MLFLOW_MODEL_URI.split("/")[1]
+            MODEL = mlflow.pytorch.load_model(MLFLOW_MODEL_URI, map_location=DEVICE)
+            MODEL_NAME = MLFLOW_MODEL_URI.split("/")[1] if MLFLOW_MODEL_URI.startswith("models:/") \
+            else "vitiscan-resnet18"
             logger.info(f"Model '{MODEL_NAME}' loaded from MLflow: {MLFLOW_MODEL_URI}")
 
             # Load disease labels from S3
-            S3_CLIENT     = boto3.client('s3')
             S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
-            DISEASES      = load_diseases(bucket_name=S3_BUCKET_NAME, dataset_name=DATASET_NAME)
-            S3_CLIENT.close()
+            DISEASES = load_diseases(bucket_name=S3_BUCKET_NAME, dataset_name=DATASET_NAME)
 
             logger.info("API startup complete (production mode).")
 
@@ -282,16 +283,15 @@ async def diagno(file: UploadFile = File(...)):
         return JSONResponse(status_code=400, content={"message": "No file received"})
 
     with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
-        contents     = await file.read()
+        contents = await file.read()
         tmp_file.write(contents)
         tmp_file_path = tmp_file.name
         logger.info(f"Uploaded image saved to temporary file: {tmp_file_path}")
 
         try:
             # Load and preprocess image
-            tensor_image = read_image(tmp_file_path)
-            pil_image    = to_pil_image(tensor_image).convert("RGB")
-            tensor       = TRANSFORM(pil_image).unsqueeze(0)
+            pil_image = Image.open(tmp_file_path).convert("RGB")
+            tensor = TRANSFORM(pil_image).unsqueeze(0)
             logger.info("Image converted to RGB tensor successfully")
 
             # Move model and tensor to target device
