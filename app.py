@@ -23,6 +23,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
 from fastapi import FastAPI, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from PIL import Image
 
@@ -240,6 +241,17 @@ app = FastAPI(
     title="Vitiscan Diagnostic API",
     description="Grape leaf disease classification using fine-tuned CNN models.",
     version="1.0.0"
+)
+
+# ── CORS — allows cross-origin requests from the Streamlit WebUI ─────────
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://mouniat-vitiscan-streamlit.hf.space",
+        "http://localhost:8501",
+    ],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
 )
 
 @app.get("/")
