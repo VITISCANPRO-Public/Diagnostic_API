@@ -287,40 +287,43 @@ async def diagno(file: UploadFile = File(...)):
                            f"Accepted types: JPEG, PNG."
             }
         )
+    
+    # ── Read uploaded file ────────────────────────────────────────────────
+    contents = await file.read()
+
+    # ── Save to temporary file ────────────────────────────────────────────
     with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
-        contents = await file.read()
-        tmp_file.write(contents) # Writes into the buffer
-        tmp_file.flush()    # Forces to write into the disk
+        tmp_file.write(contents)
         tmp_file_path = tmp_file.name
-        logger.info(f"Uploaded image saved to temporary file: {tmp_file_path}")
+    logger.info(f"Uploaded image saved to temporary file: {tmp_file_path}")
 
-        try:
-            # Load and preprocess image
-            pil_image = Image.open(tmp_file_path).convert("RGB")
-            tensor = TRANSFORM(pil_image).unsqueeze(0)
-            logger.info("Image converted to RGB tensor successfully")
+    try:
+        # Load and preprocess image
+        pil_image = Image.open(tmp_file_path).convert("RGB")
+        tensor = TRANSFORM(pil_image).unsqueeze(0)
+        logger.info("Image converted to RGB tensor successfully")
 
-            # Move model and tensor to target device
-            MODEL.to(DEVICE)
-            tensor = tensor.to(DEVICE)
-            logger.info(f"Running inference with model '{MODEL_NAME}' on device: {DEVICE}")
+        # Move model and tensor to target device
+        MODEL.to(DEVICE)
+        tensor = tensor.to(DEVICE)
+        logger.info(f"Running inference with model '{MODEL_NAME}' on device: {DEVICE}")
 
-            # Run inference
-            raw_predictions = predict_image(MODEL, tensor, CLASS_NAMES)
-            predictions = [
-                DiseasePrediction(disease=d, confidence=c)
-                for d, c in raw_predictions
-            ]
+        # Run inference
+        raw_predictions = predict_image(MODEL, tensor, CLASS_NAMES)
+        predictions = [
+            DiseasePrediction(disease=d, confidence=c)
+            for d, c in raw_predictions
+        ]
 
-        except Exception as e:
-            logger.error(f"Prediction error: {e}")
-            return JSONResponse(
-                status_code=500,
-                content={"message": "Prediction failed. See server logs for details."}
-            )
-        finally:
-            os.unlink(tmp_file_path)
-            logger.info(f"Temporary file deleted: {tmp_file_path}")
+    except Exception as e:
+        logger.error(f"Prediction error: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"message": "Prediction failed. See server logs for details."}
+        )
+    finally:
+        os.unlink(tmp_file_path)
+        logger.info(f"Temporary file deleted: {tmp_file_path}")
 
     return PredictionResponse(
         predictions=predictions,
