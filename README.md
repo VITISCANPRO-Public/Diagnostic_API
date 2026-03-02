@@ -45,9 +45,13 @@ The model classifies leaves into **7 categories** (6 diseases + healthy):
 
 ```
 Diagnostic_API/
+├── .github/
+│   └── workflows/
+│       └── ci-cd.yml              # GitHub Actions — tests + deploy 
 ├── app.py                          # FastAPI application — endpoints + startup logic
 ├── schemas.py                      # Pydantic request/response models
 ├── requirements.txt                # Python dependencies
+├── requirements-dev.txt            # Dev/test dependencies
 ├── Dockerfile                      # Docker image for HuggingFace Spaces deployment
 ├── .env.template                   # Environment variable template
 ├── environment.yml                 # Conda environment (CPU, local development)
@@ -75,7 +79,7 @@ Diagnostic_API/
 **Request:** `multipart/form-data` with a `file` field (JPEG or PNG image).
 
 ```bash
-curl -X POST "https://mouniat-vitiscanpro-diagno.hf.space/diagno" \
+curl -X POST "https://mouniat-vitiscanpro-diagno-api.hf.space/diagno" \
      -F "file=@leaf_photo.jpg"
 ```
 
@@ -180,6 +184,8 @@ The test suite covers:
 - Inference endpoint (`/diagno`) — verifies response format, sorted confidence scores, sum = 1.0
 - Error handling — missing file (422), non-image file (400/500)
 
+Tests are executed automatically by the CI/CD pipeline (`.github/workflows/ci-cd.yml`)
+on every push to `main` and on pull requests.
 ---
 
 ## Deployment
