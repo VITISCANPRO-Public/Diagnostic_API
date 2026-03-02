@@ -282,17 +282,14 @@ class TestDiagnoErrorHandling:
             f"Without a file, /diagno should return 422, received: {response.status_code}"
         )
 
-    def test_diagno_with_non_image_file_returns_error(self):
-        """
-        Sending a text file instead of an image must return an error (400 or 500).
-        The API must not crash silently.
-        """
+    def test_diagno_with_non_image_file_returns_400(self):
+        """Sending a non-image file must return HTTP 400."""
         fake_text = b"this is not an image"
         response  = client.post(
             "/diagno",
             files={"file": ("not_an_image.txt", fake_text, "text/plain")},
         )
-        assert response.status_code in [400, 422, 500], (
-            f"A non-image file should return 400, 422 or 500, "
+        assert response.status_code == 400, (
+            f"A non-image file should return 400, "
             f"received: {response.status_code}"
         )

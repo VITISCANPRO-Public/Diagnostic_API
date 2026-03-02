@@ -276,9 +276,17 @@ async def diagno(file: UploadFile = File(...)):
     Returns:
         PredictionResponse with ranked disease predictions and model version
     """
-    if file is None:
-        return JSONResponse(status_code=400, content={"message": "No file received"})
-
+    # ── Validate file type ────────────────────────────────────────────────
+    
+    ALLOWED_TYPES = {"image/jpeg", "image/png"}
+    if file.content_type not in ALLOWED_TYPES:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "message": f"Invalid file type: '{file.content_type}'. "
+                           f"Accepted types: JPEG, PNG."
+            }
+        )
     with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
         contents = await file.read()
         tmp_file.write(contents) # Writes into the buffer
