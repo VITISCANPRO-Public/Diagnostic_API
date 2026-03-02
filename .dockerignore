@@ -1,0 +1,36 @@
+# Git
+.git/
+.github/
+.gitattributes
+.gitignore
+
+# Secrets
+.env
+.envrc
+
+# Documentation
+README.md
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local MLflow data
+mlruns/
+mlartifacts/
+
+# Tests 
+tests/
+conftest.py
+requirements-dev.txt
+
+# Conda environments 
+environment.yml
+env_api_diagno_gpu.yml
+
+# Scripts one-time
+scripts/
