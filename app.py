@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 DEVICE = 'cpu'
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI")
 MLFLOW_MODEL_URI = os.getenv("MLFLOW_MODEL_URI")
 DATASET_NAME = os.getenv("DATASET_NAME", "inrae")
@@ -313,8 +314,16 @@ async def diagno(file: UploadFile = File(...)):
             }
         )
 
-    # ── Read uploaded file ────────────────────────────────────────────────
+    # ── Read and validate file size ────────────────────────────────────────
     contents = await file.read()
+    if len(contents) > MAX_FILE_SIZE:
+        return JSONResponse(
+            status_code=413,
+            content={
+                "message": f"File too large: {len(contents) / (1024 * 1024):.1f} MB. "
+                           f"Maximum allowed: {MAX_FILE_SIZE / (1024 * 1024):.0f} MB."
+            }
+        )
 
     # ── Save to temporary file ────────────────────────────────────────────
     with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:

@@ -303,3 +303,15 @@ class TestDiagnoErrorHandling:
             f"A non-image file should return 400, "
             f"received: {response.status_code}"
         )
+    def test_diagno_with_oversized_file_returns_413(self):
+        """Sending a file larger than MAX_FILE_SIZE must return HTTP 413."""
+        from app import MAX_FILE_SIZE
+        oversized_content = b"x" * (MAX_FILE_SIZE + 1)
+        response = client.post(
+            "/diagno",
+            files={"file": ("big_image.jpg", oversized_content, "image/jpeg")},
+        )
+        assert response.status_code == 413, (
+            f"An oversized file should return 413, "
+            f"received: {response.status_code}"
+        )
