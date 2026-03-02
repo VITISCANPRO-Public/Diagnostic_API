@@ -170,12 +170,10 @@ async def startup():
     """
     logger.info("Starting Vitiscan Diagnostic API...")
 
-    global DISEASES, MODEL, MODEL_NAME, TRANSFORM
-
     TESTING = os.getenv("TESTING", "false").lower() == "true"
 
     # ── Image preprocessing pipeline (identical in both modes) ────────────────
-    TRANSFORM = transforms.Compose([
+    app.state.transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(
@@ -188,11 +186,11 @@ async def startup():
         # ── Test mode ─────────────────────────────────────────────────────────
         logger.info("TESTING=true detected — loading mock model for CI environment")
 
-        MODEL = MockModel(num_classes=len(CLASS_NAMES))
-        MODEL_NAME = "mock-model-ci"
+        app.state.model = MockModel(num_classes=len(CLASS_NAMES))
+        app.state.model_name = "mock-model-ci"
 
         # Hardcoded disease dictionary with the 7 classes
-        DISEASES = {cls: cls.replace("_", " ").title() for cls in CLASS_NAMES}
+        app.state.diseases = {cls: cls.replace("_", " ").title() for cls in CLASS_NAMES}
 
         logger.info(f"Mock model loaded. Classes: {CLASS_NAMES}")
         logger.info("API startup complete (test mode).")
@@ -206,14 +204,14 @@ async def startup():
 
             # Load model directly from MLflow registry
             # MLFLOW_MODEL_URI format: "models:/model_name/version"
-            MODEL = mlflow.pytorch.load_model(MLFLOW_MODEL_URI, map_location=DEVICE)
-            MODEL_NAME = MLFLOW_MODEL_URI.split("/")[1] if MLFLOW_MODEL_URI.startswith("models:/") \
-            else "vitiscan-resnet18"
-            logger.info(f"Model '{MODEL_NAME}' loaded from MLflow: {MLFLOW_MODEL_URI}")
+            app.state.model = mlflow.pytorch.load_model(MLFLOW_MODEL_URI, map_location=DEVICE)
+            app.state.model_name = MLFLOW_MODEL_URI.split("/")[1] if MLFLOW_MODEL_URI.startswith("models:/") \
+                else "vitiscan-resnet18"
+            logger.info(f"Model '{app.state.model_name}' loaded from MLflow: {MLFLOW_MODEL_URI}")
 
             # Load disease labels from S3
             S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
-            DISEASES = load_diseases(bucket_name=S3_BUCKET_NAME, dataset_name=DATASET_NAME)
+            app.state.diseases = load_diseases(bucket_name=S3_BUCKET_NAME, dataset_name=DATASET_NAME)
 
             logger.info("API startup complete (production mode).")
 
@@ -257,7 +255,7 @@ async def get_diseases():
     Returns the list of detectable diseases and their labels.
     """
     return DiseasesResponse(
-        diseases=DISEASES,
+        diseases=app.state.diseases,
         dataset_name=DATASET_NAME
     )
 
@@ -277,7 +275,6 @@ async def diagno(file: UploadFile = File(...)):
         PredictionResponse with ranked disease predictions and model version
     """
     # ── Validate file type ────────────────────────────────────────────────
-    
     ALLOWED_TYPES = {"image/jpeg", "image/png"}
     if file.content_type not in ALLOWED_TYPES:
         return JSONResponse(
@@ -287,7 +284,7 @@ async def diagno(file: UploadFile = File(...)):
                            f"Accepted types: JPEG, PNG."
             }
         )
-    
+
     # ── Read uploaded file ────────────────────────────────────────────────
     contents = await file.read()
 
@@ -300,16 +297,16 @@ async def diagno(file: UploadFile = File(...)):
     try:
         # Load and preprocess image
         pil_image = Image.open(tmp_file_path).convert("RGB")
-        tensor = TRANSFORM(pil_image).unsqueeze(0)
+        tensor = app.state.transform(pil_image).unsqueeze(0)
         logger.info("Image converted to RGB tensor successfully")
 
         # Move model and tensor to target device
-        MODEL.to(DEVICE)
+        app.state.model.to(DEVICE)
         tensor = tensor.to(DEVICE)
-        logger.info(f"Running inference with model '{MODEL_NAME}' on device: {DEVICE}")
+        logger.info(f"Running inference with model '{app.state.model_name}' on device: {DEVICE}")
 
         # Run inference
-        raw_predictions = predict_image(MODEL, tensor, CLASS_NAMES)
+        raw_predictions = predict_image(app.state.model, tensor, CLASS_NAMES)
         predictions = [
             DiseasePrediction(disease=d, confidence=c)
             for d, c in raw_predictions
@@ -327,7 +324,7 @@ async def diagno(file: UploadFile = File(...)):
 
     return PredictionResponse(
         predictions=predictions,
-        model_version=MODEL_NAME
+        model_version=app.state.model_name
     )
 
 
