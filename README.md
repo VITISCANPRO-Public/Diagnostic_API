@@ -152,7 +152,7 @@ Copy `.env.template` to `.env` and fill in the values below.
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `MLFLOW_TRACKING_URI` | URL of the MLflow tracking server | `https://mouniat-vitiscanpro-hf.hf.space` |
-| `MLFLOW_MODEL_URI` | Model URI in MLflow registry — format: `models:/name/version` | `models:/vitiscan-resnet18@production` |
+| `MLFLOW_MODEL_URI` | Model URI in MLflow registry (see format details below) | `models:/vitiscan-resnet18@production` |
 | `MODEL_ARTIFACT_ROOT` | S3 path to the model artifact folder (used to load `disease-inrae.json`) | `s3://vitiscanpro-bucket/mlflow-artifacts/models/RUN_ID/artifacts` |
 | `S3_BUCKET_NAME` | AWS S3 bucket name | `vitiscanpro-bucket` |
 | `DATASET_NAME` | Dataset identifier, used to load the correct disease label file | `inrae` |
@@ -160,8 +160,12 @@ Copy `.env.template` to `.env` and fill in the values below.
 | `AWS_SECRET_ACCESS_KEY` | AWS secret key | `...` |
 | `AWS_DEFAULT_REGION` | AWS region | `eu-west-3` |
 
-> **`MLFLOW_MODEL_URI` format:** always use the Registry format `models:/model-name/version`.  
-> You can find the model name and version on your MLflow server under **Models → vitiscan-resnet18**.
+> **`MLFLOW_MODEL_URI` format:** use the MLflow Model Registry URI. Two formats are supported:
+> - By version number: `models:/vitiscan-resnet18/1`
+> - By alias (recommended): `models:/vitiscan-resnet18@production`
+>
+> The alias format is recommended because it decouples the deployment from a specific version number.
+> You can manage aliases on your MLflow server under **Models → vitiscan-resnet18 → Aliases**.
 
 > **`MODEL_ARTIFACT_ROOT`:** find the RUN_ID on your MLflow server — click on a training run,
 > then look at the **Artifacts** tab to see the full S3 path.
