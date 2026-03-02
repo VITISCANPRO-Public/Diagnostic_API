@@ -242,12 +242,28 @@ app = FastAPI(
     version="1.0.0"
 )
 
-
 @app.get("/")
 def root():
-    """Health check endpoint."""
-    return {"message": "Vitiscan Diagnostic API is running", "status": "ok"}
+    """Health check endpoint — verifies that model and diseases are loaded."""
+    model_loaded = hasattr(app.state, "model") and app.state.model is not None
+    diseases_loaded = hasattr(app.state, "diseases") and app.state.diseases is not None
 
+    if model_loaded and diseases_loaded:
+        return {
+            "message": "Vitiscan Diagnostic API is running",
+            "status": "ok",
+            "model": app.state.model_name,
+            "num_classes": len(CLASS_NAMES)
+        }
+
+    return JSONResponse(
+        status_code=503,
+        content={
+            "status": "unavailable",
+            "model_loaded": model_loaded,
+            "diseases_loaded": diseases_loaded
+        }
+    )
 
 @app.get("/diseases", response_model=DiseasesResponse)
 async def get_diseases():

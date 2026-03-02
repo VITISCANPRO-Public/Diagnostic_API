@@ -72,7 +72,17 @@ def create_test_image(width: int = 224, height: int = 224) -> bytes:
 
 class TestHealthCheck:
     """Verifies that the API starts and responds correctly."""
-
+    
+    def test_root_returns_model_info(self):
+        """The root response must include model name and class count."""
+        response = client.get("/")
+        data     = response.json()
+        assert "model" in data, "Missing field 'model' in root response"
+        assert "num_classes" in data, "Missing field 'num_classes' in root response"
+        assert data["num_classes"] == 7, (
+            f"Expected 7 classes, received: {data['num_classes']}"
+        )
+    
     def test_root_returns_200(self):
         """The root endpoint / must respond with HTTP status 200."""
         response = client.get("/")
