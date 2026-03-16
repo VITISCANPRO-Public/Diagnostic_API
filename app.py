@@ -161,7 +161,7 @@ async def startup():
     Two modes depending on the TESTING environment variable:
 
     ── Production mode (TESTING unset) ──────────────────────────────────────────
-    - Loads the real ResNet18 model from MLflow model registry
+    - Loads the real ResNet18 fine tuned model from MLflow model registry
     - Loads the disease label dictionary from S3
     - Initializes the image preprocessing pipeline
 
